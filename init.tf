@@ -301,6 +301,15 @@ resource "null_resource" "kustomization" {
     destination = "/var/post_install/rancher.yaml"
   }
 
+  # Upload vendored kured base manifest (DaemonSet + RBAC). Pairs with the
+  # `kured-base.yaml` entry in locals.tf:kustomization_backup_yaml.resources;
+  # the kured.yaml uploaded just below is the patch overlay that injects
+  # `local.kured_options` as container args via kustomize patches.
+  provisioner "file" {
+    content     = file("${path.module}/templates/kured-base.yaml")
+    destination = "/var/post_install/kured-base.yaml"
+  }
+
   provisioner "file" {
     content = templatefile(
       "${path.module}/templates/kured.yaml.tpl",

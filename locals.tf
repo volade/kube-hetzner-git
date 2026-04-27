@@ -75,7 +75,12 @@ locals {
     resources = concat(
       [
         "https://github.com/hetznercloud/hcloud-cloud-controller-manager/releases/download/${local.ccm_version}/ccm-networks.yaml",
-        "https://github.com/kubereboot/kured/releases/download/${local.kured_version}/kured-${local.kured_version}-dockerhub.yaml",
+        # Vendored kured base manifest, uploaded by init.tf to /var/post_install/.
+        # Replaces the upstream release-asset URL because kustomize >=5
+        # mis-detects https://github.com/.../releases/download/... URLs as git
+        # repositories and refuses to fetch them as plain files (causes
+        # `kubectl apply -k /var/post_install` to fail during post-install).
+        "kured-base.yaml",
         "https://raw.githubusercontent.com/rancher/system-upgrade-controller/9e7e45c1bdd528093da36be1f1f32472469005e6/manifests/system-upgrade-controller.yaml",
       ],
       var.disable_hetzner_csi ? [] : ["hcloud-csi.yaml"],
