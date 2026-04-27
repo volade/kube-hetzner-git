@@ -1,0 +1,131 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kured
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: kured
+  template:
+    metadata:
+      labels:
+        name: kured
+    spec:
+      serviceAccountName: kured
+      hostPID: true
+      restartPolicy: Always
+      containers:
+      - name: kured
+        image: ghcr.io/kubereboot/kured:1.17.1  # Match your current version
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        command:
+        - /usr/bin/kured
+        - --period=5m                           # Check every 5 minutes
+        - --ds-namespace=kube-system
+        - --ds-name=kured
+        - --lock-annotation=weave.works/kured-node-lock
+        - --lock-ttl=45m                        # Safe timeout, not unlimited
+        - --reboot-sentinel=/sentinel/reboot-required  # Correct path for your system
+        - --reboot-command=/usr/bin/systemctl reboot
+        - --force-reboot=false                  # Don't force, respect PDBs
+        - --drain-grace-period=300              # 5 minutes for graceful shutdown
+        - --drain-timeout=600                   # 10 minutes total drain timeout
+        - --skip-wait-for-delete-timeout=300    # Wait 5 min for stuck pods
+        - --log-format=text
+        # Maintenance window (Sunday 3-8 AM LA time)
+        - --start-time=3am
+        - --end-time=8am
+        - --time-zone=America/Los_Angeles
+        - --reboot-days=su
+        # Labels for tracking
+        - --pre-reboot-node-labels=kured=rebooting
+        - --post-reboot-node-labels=kured=done
+        # Prometheus integration (if you have it)
+        # - --prometheus-url=http://prometheus-server.monitoring.svc.cluster.local
+        # - --alert-filter-regexp=^(RebootRequired)$
+        env:
+        - name: KURED_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - containerPort: 8080
+          name: metrics
+        volumeMounts:
+        - name: sentinel
+          mountPath: /sentinel
+          readOnly: true
+        - name: hostrun
+          mountPath: /var/run
+          readOnly: true
+      tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+      - effect: NoSchedule
+        key: node.kubernetes.io/role
+        value: egress
+      volumes:
+      - name: sentinel
+        hostPath:
+          path: /var/run
+          type: Directory
+      - name: hostrun
+        hostPath:
+          path: /var/run
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kured
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kured
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list", "delete", "get"]
+- apiGroups: [""]
+  resources: ["pods/eviction"]
+  verbs: ["create"]
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kured
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kured
+subjects:
+- kind: ServiceAccount
+  name: kured
+  namespace: kube-system 
